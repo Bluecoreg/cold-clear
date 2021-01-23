@@ -1,7 +1,7 @@
 use libtetris::{ LockResult, Board, Piece };
 use crate::dag::MoveCandidate;
 
-mod standard;
+pub mod standard;
 pub use self::standard::Standard;
 pub mod changed;
 
@@ -53,4 +53,8 @@ impl<T: Evaluator> Evaluator for std::sync::Arc<T> {
     ) -> MoveCandidate<Self::Value> {
         (**self).pick_move(candidates, incoming)
     }
+}
+
+pub trait ComboableEvaluator: Evaluator {
+    fn combo_config() -> Self;
 }

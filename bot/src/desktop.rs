@@ -17,12 +17,13 @@ impl Interface {
     pub fn launch(
         board: Board,
         options: Options,
-        evaluator: impl Evaluator + Send + 'static,
+        normal_evaluator: impl Evaluator + 'static,
+        combo_evaluator: impl Evaluator + 'static,
         book: Option<Arc<Book>>
     ) -> Self {
         let (bot_send, recv) = unbounded();
         let (send, bot_recv) = unbounded();
-        std::thread::spawn(move || run(bot_recv, bot_send, board, evaluator, options, book));
+        std::thread::spawn(move || run(bot_recv, bot_send, board, normal_evaluator, combo_evaluator, options, book));
 
         Interface {
             send, recv
@@ -106,7 +107,8 @@ fn run(
     recv: Receiver<BotMsg>,
     send: Sender<(Move, Info)>,
     mut board: Board,
-    eval: impl Evaluator + 'static,
+    normal_eval: impl Evaluator + 'static,
+    combo_eval: impl Evaluator + 'static,
     options: Options,
     book: Option<Arc<Book>>
 ) {
@@ -136,17 +138,17 @@ fn run(
 
     let (result_send, result_recv) = unbounded();
 
-    let eval = Arc::new(eval);
+    let eval = Arc::new((normal_eval, combo_eval));
     loop {
         let new_tasks = bot.think(
-            &eval,
+            &eval.0, &eval.1,
             |mv, info| { send.send((mv, info)).ok(); }
         );
         for task in new_tasks {
             let result_send = result_send.clone();
             let eval = eval.clone();
             pool.spawn_fifo(move || {
-                result_send.send(task.execute(&eval)).ok();
+                result_send.send(task.execute(&eval.0, &eval.1)).ok();
             });
         }
 

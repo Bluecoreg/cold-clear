@@ -2,6 +2,26 @@ use libtetris::*;
 use serde::{ Serialize, Deserialize };
 use super::*;
 
+pub fn get_c4w_data<'a>(board: &'a Board) -> impl Iterator<Item=i32> + 'a {
+    let mut c4w_row = *u16::SOLID;
+    for x in 3..7 {
+        c4w_row.set(x, CellColor::Empty);
+    }
+
+    let mut residue_rows_over = false;
+    (0..40)
+        .skip_while(move |&y| *board.get_row(y) & c4w_row != c4w_row)
+        .take_while(move |&y| {
+            let row = *board.get_row(y);
+            if row == c4w_row {
+                residue_rows_over = true;
+                true
+            } else {
+                !residue_rows_over && row & c4w_row == c4w_row
+            }
+        })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Standard {
@@ -38,6 +58,14 @@ pub struct Standard {
     pub combo_garbage: i32,
     pub move_time: i32,
     pub wasted_t: i32,
+
+    pub max_c4w_rows: i32,
+    pub c4w_rows: i32,
+    pub c4w_rows_sq: i32,
+    pub min_c4w_residue: i32,
+    pub max_c4w_residue: i32,
+    pub low_c4w_residue_value: i32,
+    pub high_c4w_residue_value: i32,
 
     pub use_bag: bool,
     pub timed_jeopardy: bool,
@@ -82,6 +110,14 @@ impl Default for Standard {
             perfect_clear: 999,
             combo_garbage: 150,
 
+            max_c4w_rows: 15,
+            c4w_rows: 0,
+            c4w_rows_sq: 80,
+            min_c4w_residue: 0,
+            max_c4w_residue: 0,
+            low_c4w_residue_value: 0,
+            high_c4w_residue_value: -5000,
+
             use_bag: true,
             timed_jeopardy: true,
             stack_pc_damage: false,
@@ -125,11 +161,47 @@ impl Standard {
             combo_garbage: 272,
             move_time: -1,
             wasted_t: -147,
+
+            max_c4w_rows: 0,
+            c4w_rows: 0,
+            c4w_rows_sq: 0,
+            min_c4w_residue: 0,
+            max_c4w_residue: 0,
+            low_c4w_residue_value: 0,
+            high_c4w_residue_value: 0,
+
             use_bag: true,
             timed_jeopardy: false,
             stack_pc_damage: false,
             sub_name: None
         }
+    }
+
+    /// `combo_config` for `fast_config`.
+    pub fn fast_combo_config() -> Self {
+        Self::make_combo_config(Self::fast_config())
+    }
+
+    fn make_combo_config(mut config: Self) -> Self {
+        config.combo_garbage = 999;
+        config.clear1 = 250;
+        config.clear2 = -500;
+        config.clear3 = -500;
+        config.clear4 = 100;
+        config.c4w_rows = 0;
+        config.c4w_rows_sq = 40;
+        config.min_c4w_residue = 3;
+        config.low_c4w_residue_value = -100;
+        config.min_c4w_residue = 7;
+        config.high_c4w_residue_value = -500;
+        config
+    }
+}
+
+impl ComboableEvaluator for Standard {
+    /// Used for C4W comboing.
+    fn combo_config() -> Self {
+        Self::make_combo_config(Self::default())
     }
 }
 
@@ -336,6 +408,23 @@ impl Evaluator for Standard {
             let (covered_cells, covered_cells_sq) = covered_cells(&board);
             transient_eval += self.covered_cells * covered_cells;
             transient_eval += self.covered_cells_sq * covered_cells_sq;
+        }
+
+        let mut c4w_rows = 0;
+        let mut c4w_residue = 0;
+        for y in get_c4w_data(&board) {
+            c4w_residue += board.get_row(y).count_ones() - 6;
+            c4w_rows += 1;
+        }
+
+        c4w_rows = c4w_rows.min(self.max_c4w_rows);
+        transient_eval += c4w_rows * self.c4w_rows;
+        transient_eval += c4w_rows * c4w_rows * self.c4w_rows_sq;
+        if (c4w_residue as i32) < self.min_c4w_residue {
+            transient_eval += self.low_c4w_residue_value;
+        }
+        if (c4w_residue as i32) > self.max_c4w_residue {
+            transient_eval += self.high_c4w_residue_value;
         }
 
         (Value {
